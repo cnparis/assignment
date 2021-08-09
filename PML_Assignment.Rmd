@@ -1,0 +1,189 @@
+---
+title: "Practical Machine Learning assignment"
+author: "Cristián Paris"
+date: "08-08-2021"
+output: html_document
+---
+
+We begin by installing and loading the required libraries:
+
+```{r}
+install.packages("ggplot2")
+install.packages("caret")
+
+library(ggplot2)
+library(caret)
+```
+
+Next, we load the training and testing data:
+
+```{r}
+data = read.csv('sample_data/mnist_test.csv')
+
+data_train = read.csv("sample_data/pml-training.csv")
+data_test = read.csv("sample_data/pml-testing.csv")
+```
+
+```{r}
+head(data_train, 100)
+```
+
+Let's have a look at the variables we have:
+
+```{r}
+names(data_train)
+```
+
+```{r}
+ggplot(data=data_train)+
+  geom_bar(mapping= aes(x=classe, fill=user_name), position='fill')
+
+ggplot(data=data_train)+
+  geom_point(mapping = aes(x = as.numeric(row.names(data_train)), y = pitch_belt, color=classe), alpha=0.5)
+```
+
+We can see right away that the different values of "classe" are clustered together, likely due to the way the data was collected or stored. By inspection, it also looks as if the "X" variable corresponds to row number:
+
+```{r}
+ggplot(data=data_train)+
+  geom_point(mapping=aes(x=as.numeric(row.names(data_train)),y=X))
+```
+
+To avoid issues arising from this, we reshuffle the data and eliminate the "X" variable:
+
+```{r}
+data_train = subset(data_train, select=-c(X))
+
+set.seed(42)
+rows <- sample(nrow(data_train))
+data_train = data_train[rows,]
+rownames(data_train) = NULL
+```
+
+We can now move on with our analysis. Let's look at the testing set:
+
+```{r}
+head(data_train$classe)
+```
+
+```{r}
+names(data_test)
+```
+
+As we can see, we have a lot of variables! We also note that the testing set doesn't contain the "classe" variable (which we have to model and predict), whereas it contains a "problem id" variable that is not present in the training set. We therefore eliminate this variable from the testing set outright, so we can later apply our models to it without problems. We also eliminate the "X" variable, as it will not be used in the models.
+
+```{r}
+data_test = subset(data_test, select = -c(problem_id, X))
+names(data_test)
+```
+
+Let's now clean up the data. First, let's get rid of those that have a high percentage of NaN values:
+
+```{r}
+naCols = which(colMeans(!is.na(data_train)) <= 0.1)
+```
+
+```{r}
+data_train = data_train[, -naCols]
+```
+
+```{r}
+names(data_train)
+```
+
+It is apparent that a lot of variables were filtered out with this requirement. 
+
+Next up, let's explore the variability of the remaining variables. In particular, we want to eliminate those variables that exhibit variability near zero, since they do not contain valuable information:
+
+```{r}
+noVariance <- nearZeroVar(data_train)
+data_train <- data_train[,-noVariance]
+```
+
+```{r}
+names(data_train)
+```
+
+Again, it is apparent that many variables were of this type. 
+
+For consistency, we remove from the testing setthe same variables removed so far:
+
+```{r}
+data_test = data_test[,-naCols]
+data_test = data_test[,-noVariance]
+```
+
+```{r}
+names(data_test)
+```
+
+Having cleaned up the data, we move on to modeling. First, we create a partition of the data into traininig and validation:
+
+```{r}
+set.seed(42)
+inTrain <- createDataPartition(data_train$classe, p=0.7, list=F)
+training_data <- data_train[inTrain,]
+validation_data <- data_train[-inTrain,]
+```
+
+Now we can begin modeling. Let's begin with a decision tree:
+
+```{r}
+install.packages('e1071', dependencies=TRUE)
+```
+
+```{r}
+trainControl <- trainControl(method="cv", number=3, verboseIter=F)
+modelFit1 = train(classe~., data=training_data, method="rpart", trControl = trainControl, tuneLength = 5) 
+```
+
+```{r}
+modelFit1
+```
+
+Let's visualize the tree:
+
+```{r}
+install.packages("rattle")
+library(rattle)
+```
+
+```{r}
+fancyRpartPlot(modelFit1$finalModel)
+```
+
+We can evaluate the model by predicting with our validation data and then constructing the confusion matrix:
+
+```{r}
+prediction1 <- predict(modelFit1, validation_data)
+confusionMatrix1 <- confusionMatrix(prediction1, factor(validation_data$classe))
+confusionMatrix1
+```
+
+Based on the validation performance, we expect this model to have about 60% out of sample accuracy.
+
+Finally, let's predict on the testing set:
+
+```{r}
+predict(modelFit1, data_test)
+```
+
+Continuing with the analysis, let's fit a random forest and evaluate its performance on the validation set:
+
+```{r}
+modelFit2 = train(classe~., data=training_data, method="rf", trControl = trainControl, tuneLength = 5)
+modelFit2
+```
+
+```{r}
+prediction2 <- predict(modelFit2, validation_data)
+confusionMatrix2 <- confusionMatrix(prediction2, factor(validation_data$classe))
+confusionMatrix2
+```
+
+As we can see, this model is much better than the previous one! So good, in fact, that we expect it to have 99% accuracy out of sample. Let's use it to predict on the test set:
+
+```{r}
+predict(modelFit2, data_test)
+```
+
